@@ -8,6 +8,7 @@ import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.shamail.gpscam.R
 import com.shamail.gpscam.data.AppPreferences
+import com.shamail.gpscam.data.AuthManager
 import com.shamail.gpscam.data.GpsSnapshot
 import com.shamail.gpscam.data.TimestampMode
 import com.shamail.gpscam.data.WatermarkConfig
@@ -41,6 +42,10 @@ class DateTimeEditorSheet(
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (!AuthManager.isAdmin(requireContext())) {
+            dismissAllowingStateLoss()
+            return
+        }
         prefs = AppPreferences(requireContext())
         workingConfig = prefs.loadConfig()
 
@@ -106,6 +111,10 @@ class DateTimeEditorSheet(
         }
 
         binding.btnSaveTimestamp.setOnClickListener {
+            if (!AuthManager.isAdmin(requireContext())) {
+                dismissAllowingStateLoss()
+                return@setOnClickListener
+            }
             if (workingConfig.timestampMode == TimestampMode.MANUAL) {
                 tryParseTypedMillis()?.let { parsed ->
                     workingConfig = workingConfig.copy(manualTimestampMillis = parsed)

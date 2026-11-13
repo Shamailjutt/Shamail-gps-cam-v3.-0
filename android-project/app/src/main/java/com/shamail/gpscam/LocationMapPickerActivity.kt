@@ -21,6 +21,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.shamail.gpscam.data.AuthManager
 import com.shamail.gpscam.data.SavedLocationDatabase
 import com.shamail.gpscam.data.SavedLocationEntity
 import com.shamail.gpscam.databinding.ActivityLocationMapPickerBinding
@@ -41,6 +42,11 @@ class LocationMapPickerActivity : AppCompatActivity(), OnMapReadyCallback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!AuthManager.isAdmin(this)) {
+            setResult(RESULT_CANCELED)
+            finish()
+            return
+        }
 
         runCatching {
             MapsApiSettings.addInternalUsageAttributionId(
@@ -84,6 +90,14 @@ class LocationMapPickerActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         bindControls()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!AuthManager.isAdmin(this)) {
+            setResult(RESULT_CANCELED)
+            finish()
+        }
     }
 
     override fun onMapReady(map: GoogleMap) {

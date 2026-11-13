@@ -15,7 +15,7 @@ class SettingsLoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (AuthManager.isRememberedSessionActive(this)) {
+        if (AuthManager.isAdmin(this)) {
             startActivity(Intent(this, SettingsActivity::class.java))
             finish()
             return

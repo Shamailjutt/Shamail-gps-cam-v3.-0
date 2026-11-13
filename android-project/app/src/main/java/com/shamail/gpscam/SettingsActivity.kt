@@ -80,8 +80,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (!AuthManager.canEnterSettings(this)) {
-            startActivity(Intent(this, SettingsLoginActivity::class.java))
+        if (!AuthManager.isAdmin(this)) {
             finish()
             return
         }
@@ -98,10 +97,10 @@ class SettingsActivity : AppCompatActivity() {
         reloadLogoAndPreview()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isFinishing) {
-            AuthManager.clearTransientEntry()
+    override fun onResume() {
+        super.onResume()
+        if (!AuthManager.isAdmin(this)) {
+            finish()
         }
     }
 
@@ -216,7 +215,11 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnLogoutSettings.setOnClickListener {
             prefs.saveConfig(config)
             AuthManager.logout(this)
-            Toast.makeText(this, "Signed out of Protected Settings", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Logged out", Toast.LENGTH_SHORT).show()
+            val loginIntent = Intent(this, AppLoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            startActivity(loginIntent)
             finish()
         }
 

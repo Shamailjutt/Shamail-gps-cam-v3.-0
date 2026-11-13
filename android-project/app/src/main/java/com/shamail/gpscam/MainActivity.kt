@@ -28,6 +28,7 @@ import androidx.lifecycle.lifecycleScope
 import com.shamail.gpscam.data.AppPreferences
 import com.shamail.gpscam.data.AuthManager
 import com.shamail.gpscam.data.GpsSnapshot
+import com.shamail.gpscam.data.TimestampMode
 import com.shamail.gpscam.data.WatermarkConfig
 import com.shamail.gpscam.databinding.ActivityMainBinding
 import com.shamail.gpscam.location.LocationHelper
@@ -93,11 +94,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!AuthManager.hasActiveSession(this)) {
+            startActivity(Intent(this, AppLoginActivity::class.java))
+            finish()
+            return
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         prefs = AppPreferences(this)
-        val initialCfg = prefs.loadConfig()
+        val initialCfg = effectiveConfigForRole(prefs.loadConfig())
         watermarkConfig = initialCfg
         lensFacing = if (initialCfg.defaultLensFacing == 0) {
             CameraSelector.LENS_FACING_FRONT
@@ -122,6 +130,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!AuthManager.hasActiveSession(this)) {
+            startActivity(Intent(this, AppLoginActivity::class.java))
+            finish()
+            return
+        }
         reloadSettingsAndAssets()
         clockHandler.post(clockTicker)
         if (hasCameraPermission()) {
@@ -148,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnGalleryGps.setOnClickListener {
+            if (!AuthManager.isAdmin(this)) return@setOnClickListener
             val galleryGpsIntent = Intent(this, GalleryGpsEditorActivity::class.java).apply {
                 putExtra("gps_has_fix", gpsSnapshot.hasFix)
                 putExtra("gps_lat", gpsSnapshot.latitude)
@@ -162,19 +176,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnTimestampMode.setOnClickListener {
+            if (!AuthManager.isAdmin(this)) return@setOnClickListener
             openDateTimeEditor()
         }
 
         binding.watermarkPreview.setOnClickListener {
+            if (!AuthManager.isAdmin(this)) return@setOnClickListener
             openDateTimeEditor()
         }
 
         binding.btnSettings.setOnClickListener {
-            if (AuthManager.isRememberedSessionActive(this)) {
-                startActivity(Intent(this, SettingsActivity::class.java))
-            } else {
-                startActivity(Intent(this, SettingsLoginActivity::class.java))
-            }
+            if (!AuthManager.isAdmin(this)) return@setOnClickListener
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         binding.btnGallery.setOnClickListener {
@@ -215,12 +228,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun effectiveConfigForRole(rawConfig: WatermarkConfig): WatermarkConfig {
+        return if (AuthManager.isAdmin(this)) {
+            rawConfig
+        } else {
+            rawConfig.copy(
+                timestampMode = TimestampMode.AUTO_DEVICE,
+                openEditorAfterCapture = false,
+                autoLocationEnabled = true
+            )
+        }
+    }
+
+    private fun applyRoleRestrictions() {
+        val isAdmin = AuthManager.isAdmin(this)
+        binding.btnGalleryGps.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        binding.btnGalleryGps.isEnabled = isAdmin
+        binding.btnTimestampMode.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        binding.btnTimestampMode.isEnabled = isAdmin
+        binding.btnSettings.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        binding.btnSettings.isEnabled = isAdmin
+        binding.watermarkPreview.isClickable = isAdmin
+    }
+
     private fun reloadSettingsAndAssets() {
-        watermarkConfig = prefs.loadConfig()
+        watermarkConfig = effectiveConfigForRole(prefs.loadConfig())
         cachedLogoBitmap = WatermarkRenderer.loadLogoBitmap(this, watermarkConfig)
         if (cachedLogoBitmap != null) {
             binding.ivHeaderLogo.setImageBitmap(cachedLogoBitmap)
         }
+        applyRoleRestrictions()
         updateTimestampButtonBadge()
         refreshWatermarkAndHeader()
     }
@@ -250,8 +287,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDateTimeEditor() {
+        if (!AuthManager.isAdmin(this)) return
         val sheet = DateTimeEditorSheet(gpsSnapshot) { updated ->
-            watermarkConfig = updated
+            watermarkConfig = effectiveConfigForRole(updated)
             updateTimestampButtonBadge()
             refreshWatermarkAndHeader()
         }
@@ -440,7 +478,7 @@ class MainActivity : AppCompatActivity() {
             .start()
 
         val captureMomentMillis = System.currentTimeMillis()
-        val capturedConfig = watermarkConfig.copy()
+        val capturedConfig = effectiveConfigForRole(watermarkConfig.copy())
         val capturedGps = gpsSnapshot.copy()
         val isFront = lensFacing == CameraSelector.LENS_FACING_FRONT
 

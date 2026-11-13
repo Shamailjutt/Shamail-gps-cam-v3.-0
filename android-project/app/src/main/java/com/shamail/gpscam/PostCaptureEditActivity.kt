@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shamail.gpscam.data.AppPreferences
+import com.shamail.gpscam.data.AuthManager
 import com.shamail.gpscam.data.GpsSnapshot
 import com.shamail.gpscam.data.LocationSource
 import com.shamail.gpscam.data.SavedLocationDatabase
@@ -35,6 +36,7 @@ class PostCaptureEditActivity : AppCompatActivity() {
 
     private var workingConfig = WatermarkConfig()
     private var workingGps = GpsSnapshot()
+    private var originalCaptureGps = GpsSnapshot()
     private var captureMomentMillis: Long = System.currentTimeMillis()
 
     private var sourceTempFile: File? = null
@@ -81,6 +83,13 @@ class PostCaptureEditActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!AuthManager.isAdmin(this)) {
+            intent.getStringExtra("temp_photo_path")?.let { path ->
+                runCatching { File(path).delete() }
+            }
+            finish()
+            return
+        }
         binding = ActivityPostCaptureEditBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -113,6 +122,7 @@ class PostCaptureEditActivity : AppCompatActivity() {
             streetAddress = intent.getStringExtra("gps_street").orEmpty(),
             isOfflineAddress = intent.getBooleanExtra("gps_offline", false)
         )
+        originalCaptureGps = workingGps.copy()
 
         val initialMillis = workingConfig.resolveTimestampMillis(workingGps, captureMomentMillis)
         workingConfig = workingConfig.copy(manualTimestampMillis = initialMillis)
@@ -121,6 +131,13 @@ class PostCaptureEditActivity : AppCompatActivity() {
         populateInitialFields(initialMillis)
         bindActions()
         loadPreviewBitmapAsync()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!AuthManager.isAdmin(this)) {
+            discardAndFinish()
+        }
     }
 
     private fun populateInitialFields(initialMillis: Long) {
@@ -351,6 +368,10 @@ class PostCaptureEditActivity : AppCompatActivity() {
     }
 
     private fun saveFinalWatermarkedPhoto() {
+        if (!AuthManager.isAdmin(this)) {
+            discardAndFinish()
+            return
+        }
         if (isSaving) return
         val file = sourceTempFile ?: return
         isSaving = true
@@ -371,6 +392,10 @@ class PostCaptureEditActivity : AppCompatActivity() {
 
         val finalConfig = workingConfig.copy()
         val finalGps = workingGps.copy()
+        val capturedOriginalGps = originalCaptureGps.copy()
+        val hasCustomLocation = finalGps.locationSource != LocationSource.LIVE_GPS ||
+            finalGps.buildLocationHeadline() != capturedOriginalGps.buildLocationHeadline() ||
+            finalGps.streetAddress != capturedOriginalGps.streetAddress
 
         lifecycleScope.launch(Dispatchers.IO) {
             val fullResBitmap = BitmapFactory.decodeFile(file.absolutePath)
@@ -380,7 +405,10 @@ class PostCaptureEditActivity : AppCompatActivity() {
                     sourceBitmap = fullResBitmap,
                     config = finalConfig,
                     gps = finalGps,
-                    captureDeviceMillis = captureMomentMillis
+                    captureDeviceMillis = captureMomentMillis,
+                    isGalleryImport = false,
+                    hasCustomOverrides = hasCustomLocation,
+                    originalCaptureGps = capturedOriginalGps
                 )
                 fullResBitmap.recycle()
                 uri

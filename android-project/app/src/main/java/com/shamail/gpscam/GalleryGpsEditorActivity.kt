@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shamail.gpscam.data.AppPreferences
+import com.shamail.gpscam.data.AuthManager
 import com.shamail.gpscam.data.GpsSnapshot
 import com.shamail.gpscam.data.LocationSource
 import com.shamail.gpscam.data.ResolutionPreset
@@ -31,6 +32,7 @@ import com.shamail.gpscam.data.WatermarkStyle
 import com.shamail.gpscam.data.WatermarkTextColor
 import com.shamail.gpscam.databinding.ActivityGalleryGpsEditorBinding
 import com.shamail.gpscam.storage.PhotoStorageManager
+import com.shamail.gpscam.storage.SourceExifSnapshot
 import com.shamail.gpscam.ui.SequentialDateTimePicker
 import com.shamail.gpscam.watermark.WatermarkRenderer
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
 
 class GalleryGpsEditorActivity : AppCompatActivity() {
 
@@ -58,6 +61,7 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
     )
 
     private var selectedSourceUri: Uri? = null
+    private var sourceExifSnapshot: SourceExifSnapshot? = null
     private var previewBaseBitmap: Bitmap? = null
     private var currentRenderedPreview: Bitmap? = null
     private var logoBitmap: Bitmap? = null
@@ -129,6 +133,10 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!AuthManager.isAdmin(this)) {
+            finish()
+            return
+        }
         binding = ActivityGalleryGpsEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -172,6 +180,13 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
         openPhotoPicker()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!AuthManager.isAdmin(this)) {
+            finish()
+        }
+    }
+
     private fun openPhotoPicker() {
         runCatching {
             pickVisualMediaLauncher.launch(
@@ -184,14 +199,17 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
 
     private fun loadSelectedGalleryUri(uri: Uri) {
         selectedSourceUri = uri
+        sourceExifSnapshot = null
         lifecycleScope.launch(Dispatchers.IO) {
-            // Decode a responsive preview bitmap (<= 1440px) without ever modifying the source URI
+            // Read original EXIF for diff detection + decode a responsive preview bitmap (<= 1440px)
+            val exifSnap = PhotoStorageManager.readSourcePhotoExif(this@GalleryGpsEditorActivity, uri)
             val decoded = PhotoStorageManager.decodeGalleryUriBitmap(
                 context = this@GalleryGpsEditorActivity,
                 sourceUri = uri,
                 preset = ResolutionPreset.FHD
             )
             withContext(Dispatchers.Main) {
+                sourceExifSnapshot = exifSnap
                 if (decoded != null) {
                     val prev = previewBaseBitmap
                     previewBaseBitmap = decoded
@@ -691,6 +709,10 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
     }
 
     private fun exportWatermarkedGalleryPhoto() {
+        if (!AuthManager.isAdmin(this)) {
+            finish()
+            return
+        }
         if (isSaving) return
         val sourceUri = selectedSourceUri
         if (sourceUri == null) {
@@ -707,6 +729,20 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
         val exportCfg = workingConfig.copy()
         val exportGps = workingGps.copy()
         val exportMillis = System.currentTimeMillis()
+        val displayedMillis = exportCfg.resolveTimestampMillis(exportGps, exportMillis)
+        val origExif = sourceExifSnapshot
+        val coordMoved = if (origExif?.latitude != null && origExif.longitude != null) {
+            abs(exportGps.latitude - origExif.latitude) > 0.0001 ||
+                abs(exportGps.longitude - origExif.longitude) > 0.0001
+        } else {
+            true
+        }
+        val timeChanged = if (origExif?.dateTimeMillis != null) {
+            abs(displayedMillis - origExif.dateTimeMillis) > 60_000L
+        } else {
+            true
+        }
+        val hasCustomOverrides = origExif == null || coordMoved || timeChanged || exportGps.locationSource != LocationSource.LIVE_GPS
 
         lifecycleScope.launch(Dispatchers.IO) {
             val fullResBitmap = PhotoStorageManager.decodeGalleryUriBitmap(
@@ -721,7 +757,9 @@ class GalleryGpsEditorActivity : AppCompatActivity() {
                     config = exportCfg,
                     gps = exportGps,
                     captureDeviceMillis = exportMillis,
-                    isGalleryImport = true
+                    isGalleryImport = true,
+                    hasCustomOverrides = hasCustomOverrides,
+                    originalSourceExif = origExif
                 )
                 fullResBitmap.recycle()
                 uri

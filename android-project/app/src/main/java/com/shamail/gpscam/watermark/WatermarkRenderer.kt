@@ -128,7 +128,8 @@ object WatermarkRenderer {
         config: WatermarkConfig,
         gps: GpsSnapshot,
         logoBitmap: Bitmap?,
-        captureMillis: Long = System.currentTimeMillis()
+        captureMillis: Long = System.currentTimeMillis(),
+        forceOpaqueBackground: Boolean = false
     ): Bitmap {
         val output = source.copy(Bitmap.Config.ARGB_8888, true)
         if (!config.showWatermark) {
@@ -143,7 +144,8 @@ object WatermarkRenderer {
             gps = gps,
             logoBitmap = logoBitmap,
             nowMillis = captureMillis,
-            anchorToBottom = true
+            anchorToBottom = true,
+            forceOpaqueBackground = forceOpaqueBackground
         )
         return output
     }
@@ -156,7 +158,8 @@ object WatermarkRenderer {
         gps: GpsSnapshot,
         logoBitmap: Bitmap?,
         nowMillis: Long = System.currentTimeMillis(),
-        anchorToBottom: Boolean = true
+        anchorToBottom: Boolean = true,
+        forceOpaqueBackground: Boolean = false
     ): Float {
         if (!config.showWatermark || containerWidth <= 10f) return 0f
 
@@ -353,7 +356,11 @@ object WatermarkRenderer {
         val cardRect = RectF(cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight)
 
         // Semi-transparent dark charcoal background (no gold or yellow tint)
-        val alphaInt = ((config.watermarkOpacity.coerceIn(30, 95) / 100f) * 255f).toInt()
+        val alphaInt = if (forceOpaqueBackground) {
+            248
+        } else {
+            ((config.watermarkOpacity.coerceIn(30, 95) / 100f) * 255f).toInt()
+        }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(alphaInt, 20, 22, 24)
             style = Paint.Style.FILL
